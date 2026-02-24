@@ -1,4 +1,4 @@
 venv/ 
-__pycache__ 
-checkpoints 
+__pycache__/
+checkpoints/
 Environment/__pycache__/ 
