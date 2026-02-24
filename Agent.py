@@ -4,7 +4,7 @@ import ray
 
 os.environ["RAY_PICKLE_VERBOSE_DEBUG"] = "1"
 
-from CustomEnv import CustomEnv
+from Enviornment.CustomEnv import CustomEnv
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.connectors.env_to_module import FlattenObservations
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec

@@ -1,4 +1,4 @@
-from CustomEnv import CustomEnv
+from Enviornment.CustomEnv import CustomEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 

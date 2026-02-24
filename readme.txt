@@ -17,7 +17,7 @@ player starts on score of 10 with 10 segments with
 gains 3 score to get 1 segment
 
 
-
+Make obervation space definition in the ML4.py file under the RLModules library
 
 
 

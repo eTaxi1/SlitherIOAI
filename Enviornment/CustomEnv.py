@@ -2,6 +2,7 @@ import numpy as np
 import pygame
 from collections import OrderedDict
 from pettingzoo.utils import ParallelEnv
+from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from pettingzoo.utils import AECEnv
 #from pettingzoo.utils import spaces
 import gymnasium as gym
@@ -12,21 +13,21 @@ from Food import Food
 from Snake import Snake
 from Segment import Segment
 NUM_ITERS = 2000
-class CustomEnv(ParallelEnv):
+class CustomEnv(MultiAgentEnv):
     metadata = {
-    "rendermode": ["human"],  # List of supported render modes
-    "name": "SnakeEnv-v0",                 # Optional: Name of the environment
+    "rendermode": ["human", "None"],  # List of supported render modes
+    "name": "SnakeEnv-v0",                 # Name of the environment
     }
     def __init__(self, rendermode):
         super().__init__()
         self.render_mode = rendermode
         self.num_moves = 0
         self.clock = pygame.time.Clock()
-       
+        
         # Define agent names based on the number of players
         self.game = MainGame()
-        #self.game.init()
-        self.window = pygame.display.set_mode(self.game.dims)
+        #self.game.init() #Check
+        self.window = pygame.display.set_mode(self.game.dims) if self.render_mode == "human" else None
         self.grid = self.game.get_grid()
         self.food = self.game.get_food_states()
         self.mapSize = self.game.range
@@ -101,12 +102,12 @@ class CustomEnv(ParallelEnv):
         #print("MADE IT")
         self.agent_to_player = {f'agent_{i}': self.game.players[i] for i in range(self.num_players)}
         observations = {agent: self._get_observation(agent) for agent in self.agents}
-        #print("Reset Observations:", observations)
+        print("Reset Observations:", observations)
         infos = {agent: {} for agent in self.agents}
         return observations, infos
 
     def step(self, actions):
-        # Implement how actions affect the environment state
+        # Calculate Observations, actions, rewards, dones, truncations, infos
         #print(f'{self.num_moves}')
         rewards = {agent: 0 for agent in self.agents}
         dones = {agent: False for agent in self.agents}
@@ -120,7 +121,9 @@ class CustomEnv(ParallelEnv):
             self._apply_action(player, action)
             reward, dones = self._calculate_reward(player, dones, agent)
             rewards[agent] += reward
-             
+        
+
+        #Stablise food supply
         if(len(self.food) < self.num_food):
             newFood = self.game.stableFood()
             self.food.append(newFood)
@@ -130,18 +133,18 @@ class CustomEnv(ParallelEnv):
         self.agents = [agent for agent in self.agents if not dones[agent]]
         
         
-        
-        # Get new observations
+        # Update observations based upon changed state of the game from actions
         observations = {agent: self._get_observation(agent) for agent in self.agents}
         self.num_moves +=1
+        # Check if timesteps have reached the limit. Finish learning.
         env_truncation = self.num_moves >= NUM_ITERS
         truncations = {agent: env_truncation for agent in self.agents}
         if env_truncation:
             dones = {agent: True for agent in self.agents}
-        infos = {agent: {} for agent in self.agents}
+        #infos = {agent: {} for agent in self.agents}
         self.agents = [agent for agent in self.agents if not truncations[agent]]
         self.agent_to_player = {agent: self.agent_to_player[agent] for agent in self.agents}
-        #print("Step Observations:", observations)
+        print("Step Observations: ", observations)
         #print("Rewards:", rewards)
         #print("Dones:", dones)
         #print("Infos:", infos)
@@ -149,13 +152,14 @@ class CustomEnv(ParallelEnv):
         return observations, rewards, dones, truncations, infos
 
     def _apply_action(self, player, action):
-        # Apply the action to update the player's state
+        # Take in the action and speed boost apply it to the current state of the agent.
         move_action = action["move"]
         speed_boost = action["speed_boost"]
         self.grid.deleteFromCell(player)
         for seg in player.segments:
-            self.grid.deleteFromCell(seg)                   
-        direction = [move_action[0] - player.rect.x, move_action[1] - player.rect.y] #### Moving snake it the direction of xy
+            self.grid.deleteFromCell(seg)
+        # Calculating agent movement                   
+        direction = [move_action[0] - player.rect.x, move_action[1] - player.rect.y] 
         l = (direction[0]**2 + direction[1]**2) ** (1/2)
         direction[0] /= l
         direction[1] /= l
@@ -166,7 +170,7 @@ class CustomEnv(ParallelEnv):
         else:
             player.angle = desired_angle
         player.angle = math.radians(player.angle)
-        # Update player state based on action
+        # Update agent state based on action
         player.boost = bool(speed_boost)
         newFood = player.boostSnake()
         if newFood != None:
@@ -179,7 +183,9 @@ class CustomEnv(ParallelEnv):
         self.grid.addToCell(player)
         for seg in player.segments:
             self.grid.addToCell(seg)
-        # Check if direction has changed
+        # Increment counter if agent hasn't changed direction 
+        # (Used for a reward policy based on agent not changing direction 
+        # for more than 50 timesteps)
         current_direction = direction
         if np.array_equal(np.array(current_direction), np.array(player.direction)):
             self.timesteps_no_direction_change[player] += 1
@@ -307,7 +313,7 @@ class CustomEnv(ParallelEnv):
             if(player.score < 30):
                 reward_penalty = 2/100
             else:
-                reward_penalty = 2-0.3* math.log(player.score-20, 2)/100
+                reward_penalty = (2-0.3* math.log(player.score-20, 2))/100
             reward-= reward_penalty  ### Adjust so that if are much bigger the boost Doesn't penalise as much 
 
         # Penalty for not changing direction for a certain timeframe
@@ -343,6 +349,6 @@ class CustomEnv(ParallelEnv):
         #self.game.render()
 
     def close(self):
-        # Implement any cleanup logic (optional)
+        # Implement cleanup logic (optional)
         pass
 

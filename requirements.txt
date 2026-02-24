@@ -1,6 +1,7 @@
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.0
 aiosignal==1.4.0
+annotated-types==0.7.0
 asttokens==2.4.1
 attrs==24.2.0
 bleak==1.0.1
@@ -21,7 +22,7 @@ filelock==3.15.4
 fonttools==4.53.1
 frozenlist==1.4.1
 fsspec==2024.6.1
-gymnasium==0.29.1
+gymnasium==1.1.1
 idna==3.8
 imageio==2.35.1
 ipykernel==6.29.5
@@ -50,7 +51,8 @@ networkx==3.3
 numpy==1.26.4
 opencv-contrib-python==4.10.0.84
 opencv-python==4.10.0.84
-packaging==24.1
+ormsgpack==1.7.0
+packaging==26.0
 pandas==2.2.2
 parso==0.8.4
 pettingzoo==1.24.3
@@ -63,6 +65,8 @@ psutil==6.0.0
 pure_eval==0.2.3
 pyarrow==17.0.0
 PyAutoGUI==0.9.54
+pydantic==2.12.5
+pydantic_core==2.41.5
 pygame==2.6.0
 PyGetWindow==0.0.9
 Pygments==2.18.0
@@ -80,7 +84,7 @@ pytz==2024.1
 pywin32==306
 PyYAML==6.0.2
 pyzmq==26.2.0
-ray==2.35.0
+ray==2.53.0
 referencing==0.35.1
 requests==2.32.3
 rich==13.8.0
@@ -93,15 +97,18 @@ six==1.16.0
 stable_baselines3==2.3.2
 stack-data==0.6.3
 SuperSuit==3.9.3
-sympy==1.13.2
+sympy==1.14.0
 tensorboardX==2.6.2.2
 tifffile==2024.8.30
 tinyscaler==1.2.8
-torch==2.4.0
+torch==2.10.0+cu128
+torchaudio==2.10.0+cu128
+torchvision==0.25.0+cu128
 tornado==6.4.1
 traitlets==5.14.3
 typer==0.12.5
-typing_extensions==4.12.2
+typing-inspection==0.4.2
+typing_extensions==4.15.0
 tzdata==2024.1
 urllib3==2.2.2
 wcwidth==0.2.13

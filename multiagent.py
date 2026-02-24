@@ -7,7 +7,7 @@ from ray.rllib.env import ParallelPettingZooEnv
 from ray.tune.registry import register_env
 import supersuit as ss
 import numpy as np
-from CustomEnv import CustomEnv
+from Enviornment.CustomEnv import CustomEnv
 import ray
 
 

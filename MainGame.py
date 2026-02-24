@@ -22,8 +22,8 @@ START_W = 10
 FPS = 60
 NUM_ORBS = 400
 NUM_AI = 0
-MapSize = int(SCREEN_W*1.5)
-NUM_PLAYERS = 12
+MapSize = int(SCREEN_W*4)
+NUM_PLAYERS = 8
 
 
 class cameraMode(Enum):
@@ -34,7 +34,7 @@ class cameraMode(Enum):
 class MainGame:
     def __init__(self):
         self.dims = (SCREEN_W, SCREEN_H)
-        self.window = None#pygame.display.set_mode(self.dims)
+        self.window = None #pygame.display.set_mode(self.dims)
         self.winColour= (255,255,255)
         self.end = False
         self.range = MapSize
@@ -102,7 +102,7 @@ class MainGame:
             self.grid.addToCell(newPlayer)
             for seg in newPlayer.segments:
                 self.grid.addToCell(seg)
-        #self.play()
+        ##self.play() ###DISABLE
 
     def play(self):
         while self.end == False:
