@@ -70,16 +70,19 @@ class CustomEnv(MultiAgentEnv):
         #self.observation_space = self.observation_spaces[self.agents[0]]
         #self.action_space = self.action_spaces[self.agents[0]]
         self._seed = None
+        self.observation_space = self.observation_spaces[self.agents[0]]
+        self.action_space = self.action_spaces[self.agents[0]]
         # Initialize environment state variables
         self.reset()
 
     
-    def observation_space(self, agent):
-        return self.observation_spaces[agent]
+    #def get_observation_space(self, agent):
+    #    return self.observation_space[agent]
     
-    def action_space(self,agent):
-        return self.action_spaces[agent]
+    #def get_action_space(self,agent):
+     #   return self.action_space[agent]
     
+    #Reset the state of the agents
     def reset(self, seed = None, options=None):
         # Reset the game state
         self._seed = seed
@@ -102,15 +105,17 @@ class CustomEnv(MultiAgentEnv):
         #print("MADE IT")
         self.agent_to_player = {f'agent_{i}': self.game.players[i] for i in range(self.num_players)}
         observations = {agent: self._get_observation(agent) for agent in self.agents}
-        print("Reset Observations:", observations)
+        #print("Reset Observations:", observations)
         infos = {agent: {} for agent in self.agents}
         return observations, infos
-
+    
+    # Calculate Observations, actions, rewards, dones, truncation...
     def step(self, actions):
-        # Calculate Observations, actions, rewards, dones, truncations, infos
         #print(f'{self.num_moves}')
+        
         rewards = {agent: 0 for agent in self.agents}
         dones = {agent: False for agent in self.agents}
+        dones.update({"__all__": False})
         infos = {agent: {} for agent in self.agents}
         #print(f'Food Start: {len(self.food)}')
         # Update environment state based on agent actions
@@ -128,31 +133,39 @@ class CustomEnv(MultiAgentEnv):
             newFood = self.game.stableFood()
             self.food.append(newFood)
             self.grid.addToCell(newFood)
-
+        
         # Remove dead agents
-        self.agents = [agent for agent in self.agents if not dones[agent]]
+        #self.agents = [agent for agent in self.agents if not dones[agent]]
         
         
         # Update observations based upon changed state of the game from actions
         observations = {agent: self._get_observation(agent) for agent in self.agents}
         self.num_moves +=1
-        # Check if timesteps have reached the limit. Finish learning.
+        # Check if timesteps have reached the limit. Truncate all agents if at limit
         env_truncation = self.num_moves >= NUM_ITERS
         truncations = {agent: env_truncation for agent in self.agents}
+        truncations.update({"__all__": env_truncation})
         if env_truncation:
             dones = {agent: True for agent in self.agents}
         #infos = {agent: {} for agent in self.agents}
-        self.agents = [agent for agent in self.agents if not truncations[agent]]
-        self.agent_to_player = {agent: self.agent_to_player[agent] for agent in self.agents}
-        print("Step Observations: ", observations)
-        #print("Rewards:", rewards)
-        #print("Dones:", dones)
-        #print("Infos:", infos)
+        #all_done = all(done for done in dones.values())
+        if env_truncation or len(self.playersIn) <1:
+            dones["__all__"] = True
+        #self.agents = [agent for agent in self.agents if not truncations[agent]]
+        #self.agent_to_player = {agent: self.agent_to_player[agent] for agent in self.agents}
+        #print("Step Observations: ", observations)
+        #print("Rewards: ", rewards)
+        #print("Truncs: ", truncations)
+        #print("Dones: ", dones)
+        #print("Infos: ", infos)
         #print(f'Food End: {len(self.food)}')
-        return observations, rewards, dones, truncations, infos
+        obs = observations
+        terminateds = dones
+        truncateds = truncations
+        return obs, rewards, terminateds, truncateds, infos
 
+    #Update the agent based on the input
     def _apply_action(self, player, action):
-        # Take in the action and speed boost apply it to the current state of the agent.
         move_action = action["move"]
         speed_boost = action["speed_boost"]
         self.grid.deleteFromCell(player)
@@ -195,9 +208,9 @@ class CustomEnv(MultiAgentEnv):
 
     def getGridObjects(self, snake):
         return self.grid.getNearByCellPopulation(snake)
-     
+    
+    # Construct the observation dictionary for the given agent
     def _get_observation(self, agent_id):
-        # Construct the observation dictionary for the given agent
         #player = self.game.players[int(agent_id.split('_')[1])]
         player = self.agent_to_player[agent_id]
         # Assuming MainGame or Snake class has necessary methods to fetch data for observations
@@ -235,30 +248,36 @@ class CustomEnv(MultiAgentEnv):
         #print(observation)
         
         return observation
-
+    
+    #Calculate a reward based on the action of the agent
     def _calculate_reward(self, player, dones, agent_id):
         cellpop = self.grid.getCellPopulation(player)
         reward = 0
         reward += 0.01
         if self._out_of_bounds(player): ## penalty for dying on boundary  
             reward-=40
-            self.grid.deleteFromCell(player)
+            self.grid.deleteFromCell(player) # delete agent from current location 
             for seg in player.segments:
                 self.grid.deleteFromCell(seg)
             dones[agent_id] = True
+            
+            #player.reset() # reset the agent
+            #self.grid.addToCell(player) # Add agent back into game
+            #for seg in player.segments:
+            #    self.grid.addToCell(seg)
             self.playersIn.remove(player)
             normReward = reward / 100
             return normReward, dones
         for pop in cellpop:
             if player.rect.colliderect(pop.rect):
-                if type(pop) is Food: # If player eats food give reward
+                if type(pop) is Food: # If player eats food increase reward
                     self.food.remove(pop)
                     self.grid.deleteFromCell(pop)
                     player.score += round(pop.score/10) 
                     seg = player.adjustSize()
                     if seg is not None:
                         self.grid.addToCell(seg)
-                    reward+= 15 + 0.8*math.sqrt(pop.score/10)/100 #### TODO Adjust so that bigger food give higher rewards
+                    reward+= (15 + 0.8*math.sqrt(pop.score/10))/100 #### TODO Find the best formula for reward based on size of food
                 elif type(pop) is Segment: # If agent dies on body of another snake penalty
                     reward -= 70
                     dones[agent_id] = True
@@ -269,8 +288,12 @@ class CustomEnv(MultiAgentEnv):
                         self.grid.addToCell(new)
                     self.grid.deleteFromCell(player)
                     #print(f'Food after Death: {len(self.food)}')
-                    for seg in player.segments:
-                        self.grid.deleteFromCell(seg)
+                    #for seg in player.segments:
+                    #    self.grid.deleteFromCell(seg)
+                    #player.reset()
+                    #self.grid.addToCell(player)
+                    #for seg in player.segments:
+                    #    self.grid.addToCell(seg)
                     self.playersIn.remove(player)
                     normReward = reward / 100
                     return normReward, dones
@@ -288,23 +311,23 @@ class CustomEnv(MultiAgentEnv):
                 #Calculating the dot product of the 2 directions to see if they are aligned
                 #if they're aligned penalise based on how close to the body the snake is
                 dot_product = (direction[0] * move_dir[0] + direction[1] * move_dir[1])
-                if abs(dot_product) > 0.3  and dist < 60:
-                    penalty = (1 - abs(dot_product)) * ((60 - dist)/60)
-                    reward -= 0.05 * penalty
+                if dot_product >= 0  and dist < 60:
+                    penalty = (1 - dot_product) * ((60 - dist)/60)**2
+                    reward -= 0.1 * penalty
             for seg in player.segments: # Reward for another agents head moving towards the agents body and for killing another snake
                 #Getting the direction and distnace between other agents head and agents segments
                 direction = [snake.rect.x - seg.rect.x, snake.rect.y - seg.rect.y]
                 dist = (direction[0]**2 + direction[1]**2)**0.5
                 direction[0] /= dist
                 direction[1] /= dist
-                #Getting the direction of the agent which is already normalised
+                #Getting the direction of the enemy agent which is already normalised
                 move_dir = snake.direction
                 #Calculating the dot product of the directions to see if they are aligned
                 #if they're aligned reward based on how close to the other agent is to the body
                 dot_product = (direction[0] * move_dir[0] + direction[1] * move_dir[1])
-                if abs(dot_product) > 0.3 and dist < 60:
-                    bonus = (1 - abs(dot_product)) * ((60 - dist)/60)
-                    reward += 0.05 * bonus
+                if dot_product >= 0 and dist < 60:
+                    bonus = (1 - abs(dot_product)) * ((60 - dist)/60)**2
+                    reward += 0.1 * bonus
                 if snake.rect.colliderect(seg.rect): # If the other snake collides with the body reward the player
                     reward+= min(30+0.8*math.sqrt(snake.score),40)/100 ### TODO Adjust so killing bigger snakes give more rewards than smaller ones
         

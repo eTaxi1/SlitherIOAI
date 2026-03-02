@@ -46,7 +46,7 @@ class MainGame:
         self.freeCamera = FreeCam(-MapSize/2, 0, self.dims, MapSize, START_W, START_H)
         self.current_Camind = 0
         self.spectate = Spectator(0,0)
-        self.grid = Grid(150, MapSize*2)
+        self.grid = Grid(400, MapSize*2)
         self.clock = pygame.time.Clock()
         self.food = []
         self.snakes = []
