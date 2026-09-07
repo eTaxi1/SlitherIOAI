@@ -6,7 +6,6 @@ from enum import Enum
 #Game Classes
 from Player import Player
 from Food import Food
-from AI import AI
 from Snake import Snake
 from Camera import Camera
 from FreeCam import FreeCam
