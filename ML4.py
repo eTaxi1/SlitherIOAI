@@ -6,6 +6,7 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.tune.registry import get_trainable_cls, register_env
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.connectors.env_to_module import FlattenObservations
+from ray.rllib.callbacks.callbacks import RLlibCallback
 import numpy as np
 from gymnasium.spaces import Box
 import ray
@@ -15,12 +16,17 @@ os.system("ray stop")
 
 num_cpus = os.cpu_count()
 runtime_env = {"py_modules": ["Enviornment/"]}
-ray.init(log_to_driver=False, runtime_env=runtime_env)
-SAVE_INTERVAL = 50
-ITERATIONS = 10000
-orig_space = CustomEnv("None").observation_spaces["agent_0"]
+ray.init(
+    log_to_driver=True,
+    runtime_env=runtime_env,
+    num_cpus=2,
+)
+SAVE_INTERVAL = 20
+ITERATIONS = 200
+env = CustomEnv("None")
+orig_space = env.observation_spaces["agent_0"]
 flat_size = sum(np.prod(space.shape) for space in orig_space.spaces.values())
-
+orig_action_space = env.action_space
 flat_obs_space = Box(
     low=-np.inf,
     high=np.inf,
@@ -29,7 +35,23 @@ flat_obs_space = Box(
 )
 
 
+class SnakeMetricsCallback(RLlibCallback):
+    def on_episode_end(self, *, episode, metrics_logger, **kwargs):
+        final_infos= episode.get_infos(-1)
 
+        for info in final_infos.values():
+            summary = info.get("snake_episode_metrics")
+            if summary is None:
+                continue
+
+            for name, value in summary.items():
+                metrics_logger.log_value(
+                    name,
+                    value,
+                    reduce="mean",
+                    window=50,
+                )
+            break
 class RenderCallback(DefaultCallbacks):
     def __init__(self):
         super().__init__()
@@ -50,19 +72,18 @@ class RenderCallback(DefaultCallbacks):
             print(f'Episode: {self.episode_steps}')
 
 def env_creator(_):
-    return CustomEnv('None')
+    return CustomEnv("None")
 #print(f'SPACE: {ParallelPettingZooEnv(CustomEnv('human')).action_space}')
 
 #env=CustomEnv("None")
-def _env_to_module_pipeline(env, spaces, devices):
-    return FlattenObservations()
+
 if __name__ == "__main__":
     print("Starting Configuration... #################################################################")
     register_env(
         "SnakeEnv-v0",
         env_creator
     )
-
+    
     base_config = (
         PPOConfig()
         .api_stack(
@@ -76,7 +97,7 @@ if __name__ == "__main__":
             gamma=0.9,
             lr=0.0005,
             minibatch_size=64,
-            train_batch_size_per_learner=512,
+            train_batch_size_per_learner=128,
             num_epochs=20,
             vf_clip_param=10.0,
             entropy_coeff=0.01,
@@ -84,14 +105,13 @@ if __name__ == "__main__":
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
                 rl_module_specs={
-                    DEFAULT_MODULE_ID: RLModuleSpec(
+                    "shared_policy": RLModuleSpec(
                         observation_space=flat_obs_space,
-                        action_space=CustomEnv("None").action_spaces["agent_0"],
+                        action_space=orig_action_space,
                         model_config={
-                            "use_lstm": True,
-                            "lstm_cell_size": 256,
+                            "use_lstm": False,
+                            #"lstm_cell_size": 256,
                             "max_seq_len": 20,
-                            "lstm_use_prev_reward": True,
                             "fcnet_hiddens": [256],
                             "fcnet_activation": "relu",
                         },
@@ -105,10 +125,10 @@ if __name__ == "__main__":
         )
         .env_runners( # GO THROUGH STEP FUNCTION TO WORK OUT DONE AND TRUNC LOGIC
             env_to_module_connector=lambda env, spaces, device: FlattenObservations(multi_agent=True),
-            num_env_runners = 1,
+            num_env_runners = 0,
             num_envs_per_env_runner = 1,
-            sample_timeout_s = 30,
-            rollout_fragment_length=256
+            sample_timeout_s = 60,
+            rollout_fragment_length=32
         )
         .multi_agent(
             #policies={"agent_0"},
@@ -116,7 +136,7 @@ if __name__ == "__main__":
                 "shared_policy": (
                     None,
                     flat_obs_space,
-                    CustomEnv("None").action_spaces["agent_0"],
+                    orig_action_space,
                     {})
             },
             policy_mapping_fn=lambda aid, *args, **kwargs: "shared_policy",
@@ -127,6 +147,7 @@ if __name__ == "__main__":
             evaluation_num_env_runners=0, # Dont evaluate during training
             evaluation_interval=0
         )
+        .callbacks(SnakeMetricsCallback)
         #.callbacks( ### Rendering
          #   RenderCallback
         #)
@@ -144,17 +165,38 @@ if __name__ == "__main__":
         print(f"Iteration: {iter+1}")
         result = algo.train()
         #Metrics
-        mean_reward = result.get("episode_reward_mean", float("nan"))
-        mean_len = result.get("episode_len_mean", float("nan"))
-        policy_mean = result.get("policy_reward_mean", {})
-        policy_loss = result.get("policy_loss", float("nan"))
-        vf_loss = result.get("vf_loss", float("nan"))
-        entropy = result.get("entropy", float("nan"))
+        env_metrics = result.get("env_runners", {})
+
+        policy_metrics = (
+            result.get("learners", {}).get("shared_policy", {})
+        )
+        mean_reward = env_metrics.get("episode_return_mean", float("nan"))
+        mean_len = env_metrics.get("episode_len_mean", float("nan"))
+
+        policy_loss = policy_metrics.get("policy_loss", float("nan"))
+        vf_loss = policy_metrics.get("vf_loss", float("nan"))
+        entropy = policy_metrics.get("entropy", float("nan"))
         # Log metrics for each training step
-        print(f"Episode Mean Reward: {mean_reward}, Episode Mean Lenght: {mean_len}\n"
-              + f"Shared Policy Reward: {policy_mean}, Policy Loss: {policy_loss}\n"
-              + f"Value Loss: {vf_loss}, Entropy: {entropy}")
-        if iter % SAVE_INTERVAL== 0:
+        print(
+                f"Episode Mean Reward: {mean_reward}, "
+                f"Episode Mean Length: {mean_len}\n"
+                f"Policy Loss: {policy_loss}, "
+                f"Value Loss: {vf_loss}, Entropy: {entropy}"
+                )
+        snake_metric_names = (
+            "survival_steps_mean",
+            "food_eaten_mean",
+            "final_score_mean",
+            "survived_to_limit_pct",
+            "boundary_death_pct",
+            "collision_death_pct",
+        )
+        for name in snake_metric_names:
+            value = env_metrics.get(name)
+
+            if value is not None and np.isfinite(value):
+                print(f"{name}: {value:.2f}")
+        if iter % SAVE_INTERVAL== 0 and iter != 0:
             try:
                 file_path = os.path.join(os.getcwd(), f"checkpoints/Training{iter}")
                 algo.save(file_path)

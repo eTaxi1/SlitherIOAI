@@ -22,12 +22,12 @@ class CustomEnv(MultiAgentEnv):
         super().__init__()
         self.render_mode = rendermode
         self.num_moves = 0
-        self.clock = pygame.time.Clock()
+        #self.clock = pygame.time.Clock()
         
         # Define agent names based on the number of players
         self.game = MainGame()
         #self.game.init() #Check
-        self.window = pygame.display.set_mode(self.game.dims) if self.render_mode == "human" else None
+        self.window = None#pygame.display.set_mode(self.game.dims) if self.render_mode == "human" else None
         self.grid = self.game.get_grid()
         self.food = self.game.get_food_states()
         self.mapSize = self.game.range
@@ -83,7 +83,54 @@ class CustomEnv(MultiAgentEnv):
      #   return self.action_space[agent]
     
     #Reset the state of the agents
-    def reset(self, seed = None, options=None):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self._seed = seed
+
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.game.reset()
+        self.grid = self.game.get_grid()
+        self.food = self.game.get_food_states()
+        self.playersIn = self.game.players.copy()
+
+        # Restore all agents before creating episode state.
+        self.agents = self.possible_agents[:]
+        self.agent_to_player = {
+            f"agent_{i}": self.game.players[i]
+            for i in range(self.num_players)
+        }
+        self.snake_stats = {
+            player: {
+                "survival_steps": 0,
+                "food_eaten": 0,
+                "final_score": float(player.score),
+                "death_cause": None,
+            }
+            for player in self.agent_to_player.values()
+        }
+        # _apply_action() and _calculate_reward() use player objects as keys.
+        self.timesteps_no_direction_change = {
+            player: 0
+            for player in self.agent_to_player.values()
+        }
+
+        self.score_change_over_n_timesteps = {
+            agent: 0 for agent in self.agents
+        }
+
+        self.epoch += 1
+        self.num_moves = 0
+
+        observations = {
+            agent: self._get_observation(agent)
+            for agent in self.agents
+        }
+        infos = {agent: {} for agent in self.agents}
+
+        return observations, infos
+    def reset_old(self, seed = None, options=None):
         # Reset the game state
         self._seed = seed
         if seed is not None:
@@ -102,7 +149,7 @@ class CustomEnv(MultiAgentEnv):
         self.score_change_over_n_timesteps = {agent: 0 for agent in self.agents}
         #print('here')
         self.agents = self.possible_agents[:]
-        #print("MADE IT")
+        print("MADE IT")
         self.agent_to_player = {f'agent_{i}': self.game.players[i] for i in range(self.num_players)}
         observations = {agent: self._get_observation(agent) for agent in self.agents}
         #print("Reset Observations:", observations)
@@ -111,11 +158,100 @@ class CustomEnv(MultiAgentEnv):
     
     # Calculate Observations, actions, rewards, dones, truncation...
     def step(self, actions):
+        # Include agents that were alive when this step started.
+        active_agents = self.agents[:]
+
+        rewards = {agent: 0.0 for agent in active_agents}
+        terminateds = {agent: False for agent in active_agents}
+        infos = {agent: {} for agent in active_agents}
+
+        for agent, action in actions.items():
+            player = self.agent_to_player[agent]
+            stats = self.snake_stats[player]
+
+            stats["survival_steps"] += 1
+
+            self._apply_action(player, action)
+            reward, done = self._calculate_reward(player)
+
+            stats["final_score"] = float(player.score)
+            rewards[agent] = reward
+            terminateds[agent] = done
+
+        # Stabilise food supply.
+        if len(self.food) < self.num_food:
+            new_food = self.game.stableFood()
+            self.food.append(new_food)
+            self.grid.addToCell(new_food)
+
+        # Include a final observation for snakes that died THIS step.
+        # Snakes that died on previous steps are absent.
+        obs = {
+            agent: self._get_observation(agent)
+            for agent in active_agents
+        }
+
+        self.num_moves += 1
+        time_limit_reached = self.num_moves >= NUM_ITERS
+
+        surviving_agents = [
+            agent for agent in active_agents
+            if not terminateds[agent]
+        ]
+
+        # Death is termination; the time limit truncates surviving snakes.
+        truncateds = {
+            agent: time_limit_reached and not terminateds[agent]
+            for agent in active_agents
+        }
+
+        terminateds["__all__"] = len(surviving_agents) == 0
+        truncateds["__all__"] = (
+            time_limit_reached and bool(surviving_agents)
+        )
+        if terminateds["__all__"] or truncateds["__all__"]:
+            rows = list(self.snake_stats.values())
+            count = len(rows)
+
+            summary = {
+                "survival_steps_mean": sum(
+                    row["survival_steps"] for row in rows
+                ) / count,
+
+                "food_eaten_mean": sum(
+                    row["food_eaten"] for row in rows
+                ) / count,
+
+                "final_score_mean": sum(
+                    row["final_score"] for row in rows
+                ) / count,
+
+                "survived_to_limit_pct": 100.0 * sum(
+                    row["death_cause"] is None
+                    and row["survival_steps"] >= NUM_ITERS
+                    for row in rows
+                ) / count,
+
+                "boundary_death_pct": 100.0 * sum(
+                    row["death_cause"] == "boundary" for row in rows
+                ) / count,
+
+                "collision_death_pct": 100.0 * sum(
+                    row["death_cause"] == "collision" for row in rows
+                ) / count,
+            }
+            infos[active_agents[0]]["snake_episode_metrics"] = summary
+        # Finished agents must not supply data on subsequent steps.
+        self.agents = [] if time_limit_reached else surviving_agents
+        
+        return obs, rewards, terminateds, truncateds, infos
+    def step_old(self, actions):
         #print(f'{self.num_moves}')
         
         rewards = {agent: 0 for agent in self.agents}
-        dones = {agent: False for agent in self.agents}
-        dones.update({"__all__": False})
+        terminateds = {agent: False for agent in self.possible_agents}
+        terminateds.update({"__all__": False})
+        truncateds = {agent: False for agent in self.possible_agents}
         infos = {agent: {} for agent in self.agents}
         #print(f'Food Start: {len(self.food)}')
         # Update environment state based on agent actions
@@ -124,8 +260,9 @@ class CustomEnv(MultiAgentEnv):
             #player = self.game.players[int(agent_id.split('_')[1])]
             #self.lifetime[agent] += 1
             self._apply_action(player, action)
-            reward, dones = self._calculate_reward(player, dones, agent)
+            reward, done = self._calculate_reward(player)#, terminateds, agent)
             rewards[agent] += reward
+            terminateds[agent] = done
         
 
         #Stablise food supply
@@ -139,29 +276,26 @@ class CustomEnv(MultiAgentEnv):
         
         
         # Update observations based upon changed state of the game from actions
-        observations = {agent: self._get_observation(agent) for agent in self.agents}
+        obs = {agent: self._get_observation(agent) for agent in self.possible_agents}
         self.num_moves +=1
         # Check if timesteps have reached the limit. Truncate all agents if at limit
         env_truncation = self.num_moves >= NUM_ITERS
-        truncations = {agent: env_truncation for agent in self.agents}
-        truncations.update({"__all__": env_truncation})
+        truncateds = {agent: False for agent in self.agents}
+        truncateds.update({"__all__": False})
         if env_truncation:
-            dones = {agent: True for agent in self.agents}
+            terminateds = {agent: True for agent in self.agents}
         #infos = {agent: {} for agent in self.agents}
         #all_done = all(done for done in dones.values())
         if env_truncation or len(self.playersIn) <1:
-            dones["__all__"] = True
+            terminateds["__all__"] = True
         #self.agents = [agent for agent in self.agents if not truncations[agent]]
         #self.agent_to_player = {agent: self.agent_to_player[agent] for agent in self.agents}
-        #print("Step Observations: ", observations)
-        #print("Rewards: ", rewards)
-        #print("Truncs: ", truncations)
-        #print("Dones: ", dones)
+        print("Step Observations: ", obs)
+        print("Rewards: ", rewards)
+        print("Truncs: ", truncateds)
+        print("Dones: ", terminateds)
         #print("Infos: ", infos)
         #print(f'Food End: {len(self.food)}')
-        obs = observations
-        terminateds = dones
-        truncateds = truncations
         return obs, rewards, terminateds, truncateds, infos
 
     #Update the agent based on the input
@@ -234,7 +368,7 @@ class CustomEnv(MultiAgentEnv):
         #print(f'Food in grid: {len(foodInfo)}     |    Food in game: {len(self.food)}')
         if len(foodInfo)>0:
             food_pos[:len(foodInfo), :] = np.array(foodInfo)
-        observation = {
+        obs = {
             "head_position": np.array([player.rect.x/self.mapSize, player.rect.y/self.mapSize, player.direction[0], player.direction[1]]),
             "current_size":np.array([player.rect.w/max_w]),
             "body_positions": body_pos,
@@ -247,19 +381,21 @@ class CustomEnv(MultiAgentEnv):
         }
         #print(observation)
         
-        return observation
+        return obs
     
     #Calculate a reward based on the action of the agent
-    def _calculate_reward(self, player, dones, agent_id):
+    def _calculate_reward(self, player):#, dones, agent_id):
         cellpop = self.grid.getCellPopulation(player)
         reward = 0
+        done = False
         reward += 0.01
-        if self._out_of_bounds(player): ## penalty for dying on boundary  
+        if self._out_of_bounds(player): ## penalty for dying on boundary
+            self.snake_stats[player]["death_cause"] = "boundary"  
             reward-=40
             self.grid.deleteFromCell(player) # delete agent from current location 
             for seg in player.segments:
                 self.grid.deleteFromCell(seg)
-            dones[agent_id] = True
+            done = True
             
             #player.reset() # reset the agent
             #self.grid.addToCell(player) # Add agent back into game
@@ -267,10 +403,11 @@ class CustomEnv(MultiAgentEnv):
             #    self.grid.addToCell(seg)
             self.playersIn.remove(player)
             normReward = reward / 100
-            return normReward, dones
+            return normReward, done
         for pop in cellpop:
             if player.rect.colliderect(pop.rect):
                 if type(pop) is Food: # If player eats food increase reward
+                    self.snake_stats[player]["food_eaten"] += 1
                     self.food.remove(pop)
                     self.grid.deleteFromCell(pop)
                     player.score += round(pop.score/10) 
@@ -279,8 +416,9 @@ class CustomEnv(MultiAgentEnv):
                         self.grid.addToCell(seg)
                     reward+= (15 + 0.8*math.sqrt(pop.score/10))/100 #### TODO Find the best formula for reward based on size of food
                 elif type(pop) is Segment: # If agent dies on body of another snake penalty
+                    self.snake_stats[player]["death_cause"] = "collision"
                     reward -= 70
-                    dones[agent_id] = True
+                    done = True
                     newFood = self.game.dropFood(player)
                     #print(f'Food Before Death: {len(self.food)}')
                     for new in newFood:
@@ -288,15 +426,15 @@ class CustomEnv(MultiAgentEnv):
                         self.grid.addToCell(new)
                     self.grid.deleteFromCell(player)
                     #print(f'Food after Death: {len(self.food)}')
-                    #for seg in player.segments:
-                    #    self.grid.deleteFromCell(seg)
+                    for seg in player.segments:
+                        self.grid.deleteFromCell(seg)
                     #player.reset()
                     #self.grid.addToCell(player)
                     #for seg in player.segments:
                     #    self.grid.addToCell(seg)
                     self.playersIn.remove(player)
                     normReward = reward / 100
-                    return normReward, dones
+                    return normReward, done
         for snake in self.playersIn:
             if snake == player:
                 continue
@@ -344,7 +482,7 @@ class CustomEnv(MultiAgentEnv):
             reward -= 1/100  # Negative reward for lack of movement
             
         normReward = reward
-        return normReward, dones
+        return normReward, done
 
     def _out_of_bounds(self, player):
         # Check if the player's head position is out of bounds
@@ -355,6 +493,10 @@ class CustomEnv(MultiAgentEnv):
     def render(self, mode='human'):
         # Implement rendering logic to visualize the environment (optional)
         #self.window = self.game.window
+        if self.render_mode == "None":
+            return
+        if self.window is None:
+            self.window = pygame.display.set_mode(self.game.dims)
         self.window.fill(self.game.winColour)
         camera = self.game.freeCamera
         transform = camera.translate(0,0)

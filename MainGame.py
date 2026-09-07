@@ -22,8 +22,8 @@ START_W = 10
 FPS = 60
 NUM_ORBS = 400
 NUM_AI = 0
-MapSize = int(SCREEN_W*4)
-NUM_PLAYERS = 8
+MapSize = int(SCREEN_W*4)#*4
+NUM_PLAYERS = 24
 
 
 class cameraMode(Enum):
@@ -46,7 +46,7 @@ class MainGame:
         self.freeCamera = FreeCam(-MapSize/2, 0, self.dims, MapSize, START_W, START_H)
         self.current_Camind = 0
         self.spectate = Spectator(0,0)
-        self.grid = Grid(400, MapSize*2)
+        self.grid = Grid(400, MapSize*2) #400
         self.clock = pygame.time.Clock()
         self.food = []
         self.snakes = []

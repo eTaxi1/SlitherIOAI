@@ -3,7 +3,7 @@ from Snake import Snake
 from Segment import Segment
 import math
 class Grid:
-    def __init__(self, cellsize, mapSize):
+    def __init__(self, cellsize, mapSize): # 400 - 8000 1:20
         self.cellsize = cellsize
         self.mapSize = mapSize
         self.grid = [[[] for _ in range(mapSize // cellsize)] for _ in range(mapSize // cellsize)]
